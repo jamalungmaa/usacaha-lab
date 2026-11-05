@@ -17,7 +17,7 @@
   h1 { font-size: 22px; margin: 0 0 4px; }
   .subtitle { color: var(--tg-theme-hint-color, #888); font-size: 14px; margin-bottom: 16px; }
   h3 { margin: 18px 0 8px; font-size: 16px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 10px; }
   .chip {
     padding: 9px 14px; border-radius: 20px; font-size: 14px;
     border: 2px solid var(--tg-theme-hint-color, #ccc);
@@ -33,7 +33,7 @@
   .disease-card {
     background: var(--tg-theme-secondary-bg-color, #f2f2f2);
     border-radius: 14px; padding: 14px; margin-top: 16px; font-size: 15px;
-    line-height: 1.5;
+    line-height: 1.5; display: none;
   }
   .btn {
     width: 100%; padding: 14px; margin-top: 14px;
@@ -56,159 +56,196 @@
   #score { font-size: 34px; font-weight: 800; text-align: center; margin: 6px 0; }
   .diag { font-weight: 600; text-align: center; margin-bottom: 8px; }
   .note { color: var(--tg-theme-hint-color, #888); font-size: 13px; margin-top: 14px; text-align: center; }
+  #debug { color: #c0392b; font-size: 12px; margin-top: 10px; }
 </style>
 </head>
 <body>
   <h1>🧪 Лаборатория Сачковчика</h1>
   <div class="subtitle">Собери болезнь — и вылечи её сам!</div>
 
-  <div id="game">
-    <h3>1. Симптомы (выбери три)</h3>
-    <div class="chips" id="symptomChips"></div>
+  <h3>1. Симптомы (выбери три)</h3>
+  <div class="chips" id="symptomChips"></div>
 
-    <h3>2. Как передаётся</h3>
-    <div class="chips" id="spreadChips"></div>
+  <h3>2. Как передаётся</h3>
+  <div class="chips" id="spreadChips"></div>
 
-    <h3>3. Лечение (выбери до трёх методов)</h3>
-    <div class="chips" id="cureChips"></div>
+  <h3>3. Лечение (выбери до трёх методов)</h3>
+  <div class="chips" id="cureChips"></div>
 
-    <button class="btn" onclick="makeDisease()">🎲 Сгенерировать болезнь</button>
-    <button class="btn ghost" onclick="treat()">💊 Применить лечение!</button>
+  <button class="btn" id="makeBtn">🎲 Сгенерировать болезнь</button>
+  <button class="btn ghost" id="treatBtn">💊 Применить лечение!</button>
 
-    <div id="result"></div>
-    <div class="note">Все болезни и лекарства — выдумка. Если заболели по-настоящему — к настоящему врачу!</div>
-  </div>
+  <div class="disease-card" id="diseaseCard"></div>
+  <div id="result"></div>
+  <div id="debug"></div>
+  <div class="note">Все болезни и лекарства — выдумка. Если заболели по-настоящему — к настоящему врачу!</div>
 
 <script>
-const tg = window.Telegram.WebApp;
-tg.expand();
-
-// ВЫМЫШЛЕННЫЕ симптомы (вместе с "противоядиями")
-const SYMPTOMS = [
-  { id: 'itch',  n: '🟠 Зудящие пятна',      cures: ['mint'] },
-  { id: 'glow',  n: '💡 Светящийся нос',     cures: ['dark', 'sleep'] },
-  { id: 'hum',   n: '🎵 Гудение в ушах',     cures: ['lullaby'] },
-  { id: 'hug',   n: '🤗 Внезапные обнимашки', cures: ['distance'] },
-  { id: 'cryst', n: '💎 Хрустальные слёзы',  cures: ['mint'] },
-  { id: 'crow',  n: '🐓 Кукареканье по утрам', cures: ['lullaby', 'sleep'] },
-  { id: 'fear',  n: '🐙 Страх пельменей',    cures: ['therapy'] },
-  { id: 'float', n: '🎈 Лёгкость в теле (буквально)', cures: ['soup'] },
-  { id: 'echo',  n: '📢 Эхо-смех',           cures: ['lullaby', 'therapy'] },
-];
-
-const SPREAD = [
-  { id: 'air',  n: '💨 Воздушные поцелуи' },
-  { id: 'dish', n: '🍽 Общая тарелка' },
-  { id: 'look', n: '👀 Вредоносный взгляд' },
-  { id: 'wifi', n: '📶 Через Wi-Fi' },
-];
-
-// ВЫМЫШЛЕННЫЕ методы лечения. side = побочка, которая усиливает симптомы
-const CURES = [
-  { id: 'mint',     n: '🌿 Мятный компресс',      side: [] },
-  { id: 'lullaby',  n: '🎶 Баюкальная колыбельная', side: [] },
-  { id: 'sleep',    n: '😴 12 часов сна',          side: [] },
-  { id: 'distance', n: '🧱 Карантин в домике',      side: ['hug'] },
-  { id: 'soup',     n: '🍲 Суп от бабушки',        side: ['itch'] },
-  { id: 'therapy',  n: '🛋 Разговор с психологом',  side: [] },
-  { id: 'dark',     n: '🕶 Тёмные очки',            side: [] },
-];
-
-const PREFIX = ['Болезнь', 'Хворь', 'Ломота', 'Нытик', 'Зудосмет'];
-const SUFFIX = ['грозная', 'полосатая', 'ночная', 'округлая', 'таинственная'];
-
-let pickedSymptoms = [];
-let pickedSpread = null;
-let pickedCures = [];
-let bestScore = +(localStorage.getItem('doctorScore') || 0);
-
-function buildChips(containerId, items, type) {
-  const box = document.getElementById(containerId);
-  box.innerHTML = '';
-  items.forEach(item => {
-    const chip = document.createElement('div');
-    chip.className = 'chip';
-    chip.textContent = item.n;
-    chip.onclick = () => {
-      const arr = type === 'cure' ? pickedCures : pickedSymptoms;
-      const max = type === 'cure' ? 3 : 3;
-      const idx = arr.indexOf(item.id);
-      if (idx >= 0) {
-        arr.splice(idx, 1);
-        chip.classList.remove('on');
-      } else if (arr.length < max) {
-        arr.push(item.id);
-        chip.classList.add('on');
-      } else {
-        tg.showAlert('Можно выбрать не больше трёх!');
-      }
-      if (type === 'spread') {
-        pickedSpread = item.id;
-        document.querySelectorAll('#spreadChips .chip').forEach(c => c.classList.remove('on'));
-        chip.classList.add('on');
-      }
-    };
-    box.appendChild(chip);
-  });
-}
-
-function makeDisease() {
-  if (pickedSymptoms.length < 3) { tg.showAlert('Сначала выбери три симптома!'); return; }
-  if (!pickedSpread) { tg.showAlert('Выбери способ передачи!'); return; }
-  const name = PREFIX[Math.floor(Math.random() * PREFIX.length)] + ' ' +
-               SUFFIX[Math.floor(Math.random() * SUFFIX.length)];
-  const spread = SPREAD.find(s => s.id === pickedSpread).n;
-  const symList = pickedSymptoms.map(id => SYMPTOMS.find(s => s.id === id).n).join(', ');
-  document.getElementById('result').style.display = 'none';
-  tg.showAlert('Придумана: «' + name + '»!\nСимптомы: ' + symList + '\nПередаётся: ' + spread + '\nТеперь подбери лечение и жми «Применить лечение!»');
-}
-
-function treat() {
-  if (pickedSymptoms.length < 3 || !pickedSpread) { tg.showAlert('Сначала сгенерируй болезнь!'); return; }
-  if (pickedCures.length === 0) { tg.showAlert('Выбери хотя бы один метод лечения!'); return; }
-
-  let score = 0;
-  const cured = [], useless = [], harmed = [];
-
-  pickedCures.forEach(cid => {
-    const cure = CURES.find(c => c.id === cid);
-    const heals = pickedSymptoms.filter(sid => cure.cures.includes(sid));
-    const hurts = cure.side.filter(sid => pickedSymptoms.includes(sid));
-    if (heals.length) { score += heals.length * 2; cured.push(cure.n); }
-    else useless.push(cure.n);
-    if (hurts.length) { score -= hurts.length * 2; harmed.push(cure.n); }
-  });
-
-  const max = pickedSymptoms.length * 2;
-  const pct = Math.max(0, Math.min(100, Math.round(score / max * 100)));
-  let diag, emoji;
-  if (pct >= 100)      { diag = 'Полное исцеление! Нобелевка доктора Чудака обеспечена.'; emoji = '🏆'; }
-  else if (pct >= 60)  { diag = 'Пациент почти здоров. Почти.'; emoji = '😃'; }
-  else if (pct >= 30)  { diag = 'Стало лучше... местами.'; emoji = '🤔'; }
-  else if (pct > 0)    { diag = 'Пациент жив, но недоволен.'; emoji = '😬'; }
-  else                 { diag = 'Хмуро. Симптомы обиделись и стали сильнее.'; emoji = '💥'; }
-
-  let lines = [];
-  if (cured.length)   lines.push('✅ Помогло: ' + cured.join(', '));
-  if (useless.length) lines.push('⚪ Не помогло: ' + useless.join(', '));
-  if (harmed.length)  lines.push('❌ Побочка усилила болезнь: ' + harmed.join(', '));
-
-  if (pct > bestScore) {
-    bestScore = pct;
-    localStorage.setItem('doctorScore', bestScore);
+(function () {
+  // Безопасная обёртка над Telegram: если API недоступен — обычный alert
+  var tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+  if (tg) { try { tg.expand(); } catch (e) {} }
+  function notify(msg) {
+    if (tg && typeof tg.showAlert === 'function') {
+      try { tg.showAlert(msg); return; } catch (e) {}
+    }
+    alert(msg);
+  }
+  function saveScore(v) {
+    try { localStorage.setItem('sachkovchikScore', v); } catch (e) {}
+  }
+  function loadScore() {
+    try { return +(localStorage.getItem('sachkovchikScore') || 0); } catch (e) { return 0; }
   }
 
-  const res = document.getElementById('result');
-  res.style.display = 'block';
-  res.innerHTML = '<div class="diag">' + emoji + ' ' + diag + '</div>' +
-                  '<div id="score">' + pct + '%</div>' +
-                  lines.join('<br>') +
-                  '<br><small>Личный рекорд: ' + bestScore + '%</small>';
-}
+  // ВЫМЫШЛЕННЫЕ симптомы (вместе с "противоядиями")
+  var SYMPTOMS = [
+    { id: 'itch',  n: '🟠 Зудящие пятна',       cures: ['mint'] },
+    { id: 'glow',  n: '💡 Светящийся нос',      cures: ['dark', 'sleep'] },
+    { id: 'hum',   n: '🎵 Гудение в ушах',      cures: ['lullaby'] },
+    { id: 'hug',   n: '🤗 Внезапные обнимашки', cures: ['distance'] },
+    { id: 'cryst', n: '💎 Хрустальные слёзы',   cures: ['mint'] },
+    { id: 'crow',  n: '🐓 Кукареканье по утрам', cures: ['lullaby', 'sleep'] },
+    { id: 'fear',  n: '🐙 Страх пельменей',     cures: ['therapy'] },
+    { id: 'float', n: '🎈 Лёгкость в теле (буквально)', cures: ['soup'] },
+    { id: 'echo',  n: '📢 Эхо-смех',            cures: ['lullaby', 'therapy'] }
+  ];
 
-buildChips('symptomChips', SYMPTOMS, 'symptom');
-buildChips('spreadChips', SPREAD, 'spread');
-buildChips('cureChips', CURES, 'cure');
+  var SPREAD = [
+    { id: 'air',  n: '💨 Воздушные поцелуи' },
+    { id: 'dish', n: '🍽 Общая тарелка' },
+    { id: 'look', n: '👀 Вредоносный взгляд' },
+    { id: 'wifi', n: '📶 Через Wi-Fi' }
+  ];
+
+  // ВЫМЫШЛЕННЫЕ методы лечения. side = побочка, которая усиливает симптомы
+  var CURES = [
+    { id: 'mint',     n: '🌿 Мятный компресс',       side: [] },
+    { id: 'lullaby',  n: '🎶 Баюкальная колыбельная', side: [] },
+    { id: 'sleep',    n: '😴 12 часов сна',           side: [] },
+    { id: 'distance', n: '🧱 Карантин в домике',      side: ['hug'] },
+    { id: 'soup',     n: '🍲 Суп от бабушки',         side: ['itch'] },
+    { id: 'therapy',  n: '🛋 Разговор с психологом',  side: [] },
+    { id: 'dark',     n: '🕶 Тёмные очки',             side: [] }
+  ];
+
+  var PREFIX = ['Болезнь', 'Хворь', 'Ломота', 'Нытик', 'Зудосмет'];
+  var SUFFIX = ['грозная', 'полосатая', 'ночная', 'округлая', 'таинственная'];
+
+  var pickedSymptoms = [];
+  var pickedSpread = null;
+  var pickedCures = [];
+  var bestScore = loadScore();
+
+  function buildChips(containerId, items, type) {
+    var box = document.getElementById(containerId);
+    if (!box) { showDebug('Не найден блок ' + containerId); return; }
+    box.innerHTML = '';
+    items.forEach(function (item) {
+      var chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.textContent = item.n;
+      chip.addEventListener('click', function () {
+        if (type === 'spread') {
+          pickedSpread = item.id;
+          var all = box.querySelectorAll('.chip');
+          for (var i = 0; i < all.length; i++) all[i].classList.remove('on');
+          chip.classList.add('on');
+          return;
+        }
+        var arr = (type === 'cure') ? pickedCures : pickedSymptoms;
+        var max = 3;
+        var idx = arr.indexOf(item.id);
+        if (idx >= 0) {
+          arr.splice(idx, 1);
+          chip.classList.remove('on');
+        } else if (arr.length < max) {
+          arr.push(item.id);
+          chip.classList.add('on');
+        } else {
+          notify('Можно выбрать не больше трёх!');
+        }
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  function showDebug(msg) {
+    var d = document.getElementById('debug');
+    if (d) d.textContent = 'Ошибка: ' + msg;
+  }
+
+  function byId(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+
+  function makeDisease() {
+    try {
+      if (pickedSymptoms.length < 3) { notify('Сначала выбери три симптома!'); return; }
+      if (!pickedSpread) { notify('Выбери способ передачи!'); return; }
+      var name = PREFIX[Math.floor(Math.random() * PREFIX.length)] + ' ' +
+                 SUFFIX[Math.floor(Math.random() * SUFFIX.length)];
+      var spread = byId(SPREAD, pickedSpread).n;
+      var symList = pickedSymptoms.map(function (id) { return byId(SYMPTOMS, id).n; }).join(', ');
+      var card = document.getElementById('diseaseCard');
+      card.innerHTML = '<b>«' + name + '»</b><br>Симптомы: ' + symList +
+                       '<br>Передаётся: ' + spread +
+                       '<br><small>Теперь подбери лечение и жми «Применить лечение!»</small>';
+      card.style.display = 'block';
+      document.getElementById('result').style.display = 'none';
+    } catch (e) { showDebug(e.message); }
+  }
+
+  function treat() {
+    try {
+      if (pickedSymptoms.length < 3 || !pickedSpread) { notify('Сначала сгенерируй болезнь!'); return; }
+      if (pickedCures.length === 0) { notify('Выбери хотя бы один метод лечения!'); return; }
+
+      var score = 0;
+      var cured = [], useless = [], harmed = [];
+
+      pickedCures.forEach(function (cid) {
+        var cure = byId(CURES, cid);
+        var heals = pickedSymptoms.filter(function (sid) { return cure.cures.indexOf(sid) >= 0; });
+        var hurts = cure.side.filter(function (sid) { return pickedSymptoms.indexOf(sid) >= 0; });
+        if (heals.length) { score += heals.length * 2; cured.push(cure.n); }
+        else useless.push(cure.n);
+        if (hurts.length) { score -= hurts.length * 2; harmed.push(cure.n); }
+      });
+
+      var max = pickedSymptoms.length * 2;
+      var pct = Math.max(0, Math.min(100, Math.round(score / max * 100)));
+      var diag, emoji;
+      if (pct >= 100)     { diag = 'Полное исцеление! Нобелевка Сачковчика обеспечена.'; emoji = '🏆'; }
+      else if (pct >= 60) { diag = 'Пациент почти здоров. Почти.'; emoji = '😃'; }
+      else if (pct >= 30) { diag = 'Стало лучше... местами.'; emoji = '🤔'; }
+      else if (pct > 0)   { diag = 'Пациент жив, но недоволен.'; emoji = '😬'; }
+      else                { diag = 'Хмуро. Симптомы обиделись и стали сильнее.'; emoji = '💥'; }
+
+      var lines = [];
+      if (cured.length)   lines.push('✅ Помогло: ' + cured.join(', '));
+      if (useless.length) lines.push('⚪ Не помогло: ' + useless.join(', '));
+      if (harmed.length)  lines.push('❌ Побочка усилила болезнь: ' + harmed.join(', '));
+
+      if (pct > bestScore) { bestScore = pct; saveScore(bestScore); }
+
+      var res = document.getElementById('result');
+      res.innerHTML = '<div class="diag">' + emoji + ' ' + diag + '</div>' +
+                      '<div id="score">' + pct + '%</div>' +
+                      lines.join('<br>') +
+                      '<br><small>Личный рекорд: ' + bestScore + '%</small>';
+      res.style.display = 'block';
+    } catch (e) { showDebug(e.message); }
+  }
+
+  document.getElementById('makeBtn').addEventListener('click', makeDisease);
+  document.getElementById('treatBtn').addEventListener('click', treat);
+
+  buildChips('symptomChips', SYMPTOMS, 'symptom');
+  buildChips('spreadChips', SPREAD, 'spread');
+  buildChips('cureChips', CURES, 'cure');
+})();
 </script>
 </body>
 </html>
